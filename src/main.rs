@@ -17,15 +17,32 @@ async fn main() {
 }
 
 async fn process(socket: TcpStream) {
-    // connection을 사용하면 redis frames 대신 byte streams이다.
-    // connection 유형은 mini-redis로 정의된다.
+    use mini_redis::Command::{self, Get, Set};
+    use std::collections::HashMap;
+
+    // 데이터 저장용 hashmap
+    let mut db = HashMap::new();
+
+    // mini-redis가 제공하는 connection은 이렇게 구문 분석 프레임을 처리한다.
     let mut connection = Connection::new(socket);
 
-    if let Some(frame) = connection.read_frame().await.unwrap() {
-        println!("GOT: {:?}", frame);
+    while let Some(frame) = connection.read_frame().await.unwrap() {
+        let response = match Command::from_frame(frame).unwrap() {
+            Set(cmd) => {
+                db.insert(cmd.key().to_string(), cmd.value().to_vec());
+                Frame::Simple("Ok".to_string())
+            }
+            Get(cmd) => {
+                if let Some(value) = db.get(cmd.key()) {
+                    Frame::Bulk(value.clone().into())
+                } else {
+                    Frame::Null
+                }
+            }
+            cmd => panic!("unimplemented {:?}", cmd),
+        };
 
-        // error 반환
-        let response = Frame::Error("unimplemented".to_string());
+        // 클라이언트의 응답
         connection.write_frame(&response).await.unwrap();
     }
 }
