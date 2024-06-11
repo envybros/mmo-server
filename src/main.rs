@@ -1,20 +1,31 @@
-use mini_redis::{client, Result};
+use tokio::net::{TcpListener, TcpStream};
+use mini_redis::{Connection, Frame};
 
-// 이 녀석은 매크로이다.
 #[tokio::main]
-async fn main() -> Result<()> {
-    // mini-redis 주소에 대한 연결
-    // 이런 비동기 함수(connect())는 await가 붙지 않으면 절대 실행되지 않는다.
-    // rust에서는... 비동기가 엄청 특이하게 동작한다.
-    let mut client = client::connect("127.0.0.1:6379").await?;
+async fn main() {
+    // 리스너를 주소에 "바인딩"한다.
+    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
-    // 키, 값 설정
-    client.set("envy", "bros".into()).await?;
+    loop {
+        // 두번째 인자에는 새 연결의 ip와 포트가 포함된다.
+        let (socket, _) = listener.accept().await.unwrap();
 
-    // 키 얻어오기
-    let result = client.get("envy").await?;
+        tokio::spawn(async move {
+            process(socket).await;
+        });
+    }
+}
 
-    println!("서버로부터 값을 가져오기; result={:?}", result);
+async fn process(socket: TcpStream) {
+    // connection을 사용하면 redis frames 대신 byte streams이다.
+    // connection 유형은 mini-redis로 정의된다.
+    let mut connection = Connection::new(socket);
 
-    Ok(())
+    if let Some(frame) = connection.read_frame().await.unwrap() {
+        println!("GOT: {:?}", frame);
+
+        // error 반환
+        let response = Frame::Error("unimplemented".to_string());
+        connection.write_frame(&response).await.unwrap();
+    }
 }
